@@ -75,12 +75,14 @@ while(True):
         sum_y = sum([point[1] for point in points])
         sum_xy = sum([point[0] * point[1] for point in points])
         sum_x_squared = sum([point[0] ** 2 for point in points])
-        m = (n * sum_xy - sum_x * sum_y) / (n * sum_x_squared - sum_x ** 2)
+        m = (n * sum_xy - sum_x * sum_y) / (n * sum_x_squared - sum_x ** 2 +0.001)
         c = (sum_y - m * sum_x) / n
         distance = abs(c) / math.sqrt(1 + m**2)
         angle = math.degrees(math.atan(m))
         if angle > 0:
             angle = abs(angle -90)
+            turn_flag = 0
+        elif angle==0:
             turn_flag = 0
         else:
             angle = abs(angle + 90)
@@ -88,9 +90,9 @@ while(True):
         return angle,distance,turn_flag
 
     angle,distance,turn_flag = line(points)
-    FH = bytearray([0x2C, 0x12, (int)(distance), (int)(angle), turn_flag, 1, 0x5B])
+    FH = bytearray([0x2C, 0x12, (int)(distance/2.0), (int)(angle), turn_flag, 1, 0x5B])
     uart.write(FH)
 
-    """ print("截距 c:", distance,"jiao:", angle,"旋转：",turn_flag)
+    """ print("截距 c:", distance/2.0,"jiao:", angle,"旋转：",turn_flag)
     print(clock.fps()) """
 
