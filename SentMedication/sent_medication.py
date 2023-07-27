@@ -3,7 +3,14 @@ import sensor
 import image
 import time
 import math
+
+import os
+import tf
+import uos
+import gc
 from pyb import LED, UART
+
+number_test, cross_test = False, False
 
 uart = UART(3, 115200)
 uart.init(115200, bits=8, parity=None, stop=1)
@@ -12,7 +19,6 @@ LED(1).on()
 LED(2).on()
 LED(3).on()
 
-# TODO： 红线
 THRESHOLD = [(21, 56, 72, 18, 93, -61)]
 GRAYSCALE_THRESHOLD = [(0, 77)]
 
@@ -37,11 +43,15 @@ rois = [
 ]
 
 
-def sending_data(turn_flag, distance, angle, number):
+def sending_data(turn_flag, distance, angle, number, sleep_ms):
     global uart
     data = bytearray([0x2C, 0x12, turn_flag,
                      distance, angle, number, 0x5B])
     uart.write(data)
+    FH = bytearray([0x2C, 0x12, 66, 66, 66, 66, 0x5B])
+    uart.write(FH)
+    if sleep_ms > 0:
+        time.sleep_ms(sleep_ms)
 
 
 # 计算最小二乘法直线拟合的参数
@@ -56,6 +66,7 @@ def line(points):
     distance = abs(c) / math.sqrt(1 + m**2)
     angle = math.degrees(math.atan(m))
     turn_flag = 0
+    # TODO: 下面是不是转弯弄反了
     if angle > 0:
         angle = abs(angle - 90)
         turn_flag = 4
@@ -66,16 +77,60 @@ def line(points):
         turn_flag = 5
     return angle, distance, turn_flag
 
-# TODO: 上面是不是转弯弄反了
-# TODO：第一次数字识别
+
+net = None
+labels = None
+net = tf.load("trained.tflite", load_to_fb=uos.stat(
+    'trained.tflite')[6] > (gc.mem_free() - (64*1024)))
+# labels = [line.rstrip('\n') for line in open("labels.txt")]
+labels = ['3', '4', '5', '6']  # TODO: 修改label
+
+
+def find_number(windos_roi: tuple):
+    number_count = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0}
+    while (True):
+        if number_test:  # ! number_test
+            clock.tick()
+
+        img = sensor.snapshot().binary([(0, 31, -22, 10, -12, 28)])
+        img = img.erode(1)
+        img = img.dilate(1)
+
+        for obj in net.classify(img, min_scale=1.0, scale_mul=0.8, x_overlap=0.5, y_overlap=0.5, roi=windos_roi):
+            predictions_list = list(zip(labels, obj.output()))
+            large_count, index = 0, 0
+            for i in range(len(predictions_list)):
+                if predictions_list[i][1] > large_count:
+                    large_count = predictions_list[i][1]
+                    index = i
+            number_count[(int)(predictions_list[index][0])] += 1
+            if number_test:  # ! number_test
+                print(
+                    "*******\nPredictions at [x=%d,y=%d,w=%d,h=%d]" % obj.rect())
+                img.draw_rectangle(obj.rect())
+                print(predictions_list[index][0])
+                for i in range(len(predictions_list)):
+                    print("%s = %f" %
+                          (predictions_list[i][0], predictions_list[i][1]))
+                print(clock.fps(), "fps")
+
+        # TODO: 是否加一个白板用来第一次识别数字，直到识别到才启动
+        for i in number_count:
+            if number_count[i] == 10:
+                return i
+
+
+number = find_number((80, 0, 80, 120))
+sending_data(66, 66, 99, number, 0)
 
 
 crosscount = 0  # 十字路口计数
 while (True):
     clock.tick()
     img = sensor.snapshot()
-    for i in rois:
-        img.draw_rectangle(i, color=200)
+    if cross_test:  # ! cross_test
+        for i in rois:
+            img.draw_rectangle(i, color=200)
 
     cross_blobs = []
     points = []
@@ -92,7 +147,8 @@ while (True):
                     largest_blob = i
 
             # 画出
-            img.draw_rectangle(blobs[largest_blob].rect())
+            if cross_test:  # ! cross_test
+                img.draw_rectangle(blobs[largest_blob].rect())
             if (blobs[largest_blob].cx() < 40 or blobs[largest_blob].cx() > 120) and blobs[largest_blob].w() > 10:
                 cross_blobs.append((blobs[largest_blob].cx(),
                                     blobs[largest_blob].cy()))
@@ -100,60 +156,48 @@ while (True):
                 points.append((blobs[largest_blob].cx(),
                                blobs[largest_blob].cy()))
 
-    turn_flag = 6  # 0 停止；1 左转；2 右转；3 180度转；4 左微调；5 右微调；6 直走
-    number = 0
+    # 0 停止；1 左转；2 右转；3 180度转；4 左微调；5 右微调；6 直走
+    turn_flag = {"stop": 0, "90left": 1, "90right": 2, "180": 3,
+                 "left": 4, "right": 5, "go": 6}
     if len(cross_blobs) == 2:
         crosscount += 1
         # print("crosscount : ", crosscount)
-        if crosscount == 1:  # 并且number == 1 or number == 2
+        if crosscount == 1 and (number == 1 or number == 2):
             # 暂时是暂停，然后直走，然后左转
-            turn_flag = 1
-            sending_data(turn_flag, 0, 0, number)
-            time.sleep_ms(10000)
-            turn_flag = 6
-            sending_data(turn_flag, 0, 0, number)
-            time.sleep_ms(4000)
-            turn_flag = 1
-            sending_data(turn_flag, 0, 0, number)
-            time.sleep_ms(40000)
+            sending_data(turn_flag["stop"], 0, 0, 0, 5000)
+            sending_data(turn_flag["go"], 0, 0, 0, 4000)
+            sending_data(turn_flag["90left"], 0, 0, 0, 4000)
+        elif (crosscount == 2 and (number == 3 or number == 4)) or crosscount == 4 or crosscount == 5:
+            sending_data(turn_flag["stop"], 0, 0, 0, 2000)
 
-        elif crosscount == 2 or crosscount == 4 or crosscount == 5:
-            # 暂停识别
-            turn_flag = 0
-            sending_data(turn_flag, 0, 0, number)
-            # TODO : 数字识别,当识别到才跳出
-            time.sleep_ms(2000)  # 暂时
-            # 计数前进
-            turn_flag = 6
-            sending_data(turn_flag, 0, 0, number)
-            time.sleep_ms(1000)
-# 测试用
-            if crosscount == 4:
-                turn_flag = 1
-                sending_data(turn_flag, 0, 0, number)
-            """ # TODO： 数字在哪边，进而判断走转还是右转
-            turn_flag = 0
-            sending_data(turn_flag, 0, 0, number)
-            time.sleep_ms(1000)"""
+            if cross_test:  # ! cross_test
+                left_number = find_number((0, 0, 80, 120))
+                right_number = find_number((80, 0, 80, 120))
+                sending_data(66, 66, 99, left_number, 0)
+                sending_data(66, 66, 99, right_number, 0)
+
+            if number == find_number((80, 0, 80, 120)):
+                t = "90right"
+            elif number == find_number((0, 0, 80, 120)):
+                t = "90left"
+            else:
+                t = "180"
+            sending_data(turn_flag["go"], 0, 0, 0, 1000)
+            sending_data(turn_flag[t], 0, 0, 0, 1000)
         else:
-            # 计数前进
-            turn_flag = 6
-            sending_data(turn_flag, 0, 0, number)
-            time.sleep_ms(1000)
-            # 规定默认向左转
-            turn_flag = 1
-            sending_data(turn_flag, 0, 0, number)
+            sending_data(turn_flag['go'], 0, 0, 0, 1000)
+            sending_data(turn_flag['90left'], 0, 0, 00, 0)
     elif len(points) > 4:
         angle, distance, turn_flag = line(points)
         sending_data(turn_flag, (int)(distance / 2.0),
-                     (int)(angle), number)
-        print("截距 c:", distance / 2.0, "jiao:", angle, "旋转：",
-              turn_flag, "crosscount:", number)
+                     (int)(angle), 0, 0)
+        if cross_test:  # ! cross_test
+            print("截距 c:", distance / 2.0, "jiao:", angle, "旋转：",
+                  turn_flag, "crosscount:", number)
     elif len(points) < 2:  # 停止
         # 或者再计数前进一会再停止
-        turn_flag = 0
-        sending_data(turn_flag,
-                     0, 0, number)
+        sending_data(turn_flag['stop'],
+                     0, 0, 0, 0)
     else:
         a = 0
         # TODO :
