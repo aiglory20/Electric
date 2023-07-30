@@ -1,4 +1,4 @@
-""" 送药小车 未成功"""
+""" 送药小车成功"""
 import sensor
 import image
 import time
@@ -45,11 +45,11 @@ rois = [
 
 def sending_data(turn_flag, distance, angle, number, sleep_ms):
     global uart
+    FH = bytearray([0x2C, 0x12, 66, 66, 66, 66, 0x5B])
+    uart.write(FH)
     data = bytearray([0x2C, 0x12, turn_flag,
                      distance, angle, number, 0x5B])
     uart.write(data)
-    FH = bytearray([0x2C, 0x12, 66, 66, 66, 66, 0x5B])
-    uart.write(FH)
     if sleep_ms > 0:
         time.sleep_ms(sleep_ms)
 
@@ -66,7 +66,6 @@ def line(points):
     distance = abs(c) / math.sqrt(1 + m**2)
     angle = math.degrees(math.atan(m))
     turn_flag = 0
-    # TODO: 下面是不是转弯弄反了
     if angle > 0:
         angle = abs(angle - 90)
         turn_flag = 4
@@ -89,7 +88,8 @@ labels = ['3', '4', '5', '6']  # TODO: 修改label
 def find_number(windos_roi: tuple):
     number_count = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0}
     while (True):
-        if number_test:  # ! number_test
+        sending_data(0, 0, 0, 0, 0)
+        if number_print:  # ! number_print
             clock.tick()
 
         img = sensor.snapshot().binary([(0, 31, -22, 10, -12, 28)])
@@ -104,7 +104,7 @@ def find_number(windos_roi: tuple):
                     large_count = predictions_list[i][1]
                     index = i
             number_count[(int)(predictions_list[index][0])] += 1
-            if number_test:  # ! number_test
+            if number_print:  # ! number_print
                 print(
                     "*******\nPredictions at [x=%d,y=%d,w=%d,h=%d]" % obj.rect())
                 img.draw_rectangle(obj.rect())
@@ -116,10 +116,11 @@ def find_number(windos_roi: tuple):
 
         # TODO: 是否加一个白板用来第一次识别数字，直到识别到才启动
         for i in number_count:
-            if number_count[i] == 10:
+            if number_count[i] == 20:
                 return i
 
 
+# number = 7
 number = find_number((80, 0, 80, 120))
 sending_data(66, 66, 99, number, 0)
 
@@ -128,7 +129,7 @@ crosscount = 0  # 十字路口计数
 while (True):
     clock.tick()
     img = sensor.snapshot()
-    if cross_test:  # ! cross_test
+    if cross_print:  # ! cross_print
         for i in rois:
             img.draw_rectangle(i, color=200)
 
@@ -147,7 +148,7 @@ while (True):
                     largest_blob = i
 
             # 画出
-            if cross_test:  # ! cross_test
+            if cross_print:  # ! cross_print
                 img.draw_rectangle(blobs[largest_blob].rect())
             if (blobs[largest_blob].cx() < 40 or blobs[largest_blob].cx() > 120) and blobs[largest_blob].w() > 10:
                 cross_blobs.append((blobs[largest_blob].cx(),
@@ -161,16 +162,19 @@ while (True):
                  "left": 4, "right": 5, "go": 6}
     if len(cross_blobs) == 2:
         crosscount += 1
-        # print("crosscount : ", crosscount)
-        if crosscount == 1 and (number == 1 or number == 2):
-            # 暂时是暂停，然后直走，然后左转
-            sending_data(turn_flag["stop"], 0, 0, 0, 5000)
-            sending_data(turn_flag["go"], 0, 0, 0, 4000)
-            sending_data(turn_flag["90left"], 0, 0, 0, 4000)
+        print("crosscount : ", crosscount)
+        if crosscount == 1:
+            sending_data(turn_flag["go"], 0, 0, crosscount, 550)
+            if number == 2:
+                sending_data(turn_flag["90left"], 0, 0, crosscount, 0)
+            elif number == 1:
+                sending_data(turn_flag["90right"], 0, 0, crosscount, 0)
+        elif crosscount == 3:
+            sending_data(turn_flag['go'], 0, 0, 0, 550)
+            sending_data(turn_flag['90left'], 0, 0, 0, 0)
         elif (crosscount == 2 and (number == 3 or number == 4)) or crosscount == 4 or crosscount == 5:
-            sending_data(turn_flag["stop"], 0, 0, 0, 2000)
 
-            if cross_test:  # ! cross_test
+            if number_print:  # ! number_print
                 left_number = find_number((0, 0, 80, 120))
                 right_number = find_number((80, 0, 80, 120))
                 sending_data(66, 66, 99, left_number, 0)
@@ -182,18 +186,17 @@ while (True):
                 t = "90left"
             else:
                 t = "180"
-            sending_data(turn_flag["go"], 0, 0, 0, 1000)
-            sending_data(turn_flag[t], 0, 0, 0, 1000)
+            sending_data(turn_flag["go"], 0, 0, 0, 550)
+            sending_data(turn_flag[t], 0, 0, 0, 0)
         else:
-            sending_data(turn_flag['go'], 0, 0, 0, 1000)
-            sending_data(turn_flag['90left'], 0, 0, 00, 0)
+            sending_data(turn_flag['go'], 0, 0, 0, 550)
     elif len(points) > 4:
         angle, distance, turn_flag = line(points)
         sending_data(turn_flag, (int)(distance / 2.0),
-                     (int)(angle), 0, 0)
-        if cross_test:  # ! cross_test
+                     (int)(angle), 0, crosscount)
+        if cross_print:  # ! cross_print
             print("截距 c:", distance / 2.0, "jiao:", angle, "旋转：",
-                  turn_flag, "crosscount:", number)
+                  turn_flag, "number:", number)
     elif len(points) < 2:  # 停止
         # 或者再计数前进一会再停止
         sending_data(turn_flag['stop'],
