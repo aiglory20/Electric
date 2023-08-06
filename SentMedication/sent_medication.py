@@ -10,7 +10,7 @@ import uos
 import gc
 from pyb import LED, UART
 
-number_test, cross_test = False, False
+number_print, cross_print = False, False
 
 uart = UART(3, 115200)
 uart.init(115200, bits=8, parity=None, stop=1)
