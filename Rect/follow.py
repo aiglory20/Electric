@@ -1,10 +1,11 @@
-"第一版，绿追红激光，pid可以更优化"
-import sensor
-import image
-import time
-
-from pid import PID
 from pyb import Servo
+from pid import PID
+import time
+import image
+import sensor
+"第一版，绿追红激光，pid可以更优化"
+"开始，复位，暂停"
+
 
 start, is_pid, is_print, draw_print = True, True, False, True
 
@@ -41,8 +42,8 @@ def find_max(blobs):
 
 
 red_threshold = (1, 100, 22, 127, -82, 118)
-yaw = 92 #137 + 10 # you + zuo -
-pitch = 100 # 100  # shang + xia -
+yaw = 92  # 137 + 10 # you + zuo -
+pitch = 100  # 100  # shang + xia -
 while (True):
     img = sensor.snapshot()
     if start:  # ! start
@@ -51,15 +52,15 @@ while (True):
         print(yaw)
         a = 0
 
-    '''clock.tick()
+    clock.tick()
     img = sensor.snapshot()
 
-    center_x = img.width()/2 + 90
+    center_x = img.width()/2 + 85
     center_y = img.height()/2
     img.draw_circle((int)(center_x), (int)
                     (center_y), 2, thickness=2, fill=True)
 
-    blobs = img.find_blobs([red_threshold], roi=(243, 8, 397, 361))
+    blobs = img.find_blobs([red_threshold], roi=(75, 97, 544, 328))
     if blobs:
         max_blob = find_max(blobs)
         x_error = max_blob.cx()-center_x
@@ -92,4 +93,4 @@ while (True):
         pitch_servo.angle(pitch)
     else:
         yaw_servo.angle(yaw)
-        pitch_servo.angle(pitch)'''
+        pitch_servo.angle(pitch)
